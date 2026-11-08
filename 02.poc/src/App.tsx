@@ -1,16 +1,20 @@
 import { useState } from "react";
+import { defaultRules, parseRules } from "./game/rules";
 import { LocalGame } from "./components/LocalGame";
 import { OnlineEntry, OnlineRoom } from "./components/OnlineRoom";
 import { SetupScreen, type PlayMode, type SetupValues } from "./components/SetupScreen";
 import { useOnline } from "./online/useOnline";
 
 const settingsKey = "draw-daifugo:settings";
-const defaultSettings: SetupValues = { playerCount: 4, handSize: 7, jokerCount: 2, names: [], handoff: true };
+const defaultSettings: SetupValues = { playerCount: 4, handSize: 7, jokerCount: 2, names: [], handoff: true, rules: defaultRules };
 
 function loadSettings(): SetupValues {
   try {
     const raw = localStorage.getItem(settingsKey);
-    return raw ? { ...defaultSettings, ...(JSON.parse(raw) as Partial<SetupValues>) } : defaultSettings;
+    if (!raw) return defaultSettings;
+    const saved = JSON.parse(raw) as Partial<SetupValues>;
+    // 以前のバージョンで保存した設定にはルールがないため、既定値で補う。
+    return { ...defaultSettings, ...saved, rules: parseRules(saved.rules) ?? defaultRules };
   } catch {
     return defaultSettings;
   }

@@ -10,6 +10,7 @@ function newGame(settings: SetupValues): GameState {
     playerCount: settings.playerCount,
     handSize: settings.handSize,
     jokerCount: settings.jokerCount,
+    rules: settings.rules,
     playerNames: settings.names,
   });
 }

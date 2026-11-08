@@ -9,6 +9,8 @@ interface HandPanelProps {
   viewerIndex: number;
   /** 操作できるか（オンラインでは自分の手番のときだけ）。 */
   canAct: boolean;
+  /** オンライン対戦の思考時間の残り秒数。 */
+  turnSecondsLeft?: number | null;
   selected: string[];
   freshIds: string[];
   message: string;
@@ -27,7 +29,7 @@ function overlapFor(count: number): number {
   return -0.55;
 }
 
-export function HandPanel({ game, viewerIndex, canAct, selected, freshIds, message, onToggle, onClear, onPlay, onPass, onResolve }: HandPanelProps) {
+export function HandPanel({ game, viewerIndex, canAct, turnSecondsLeft, selected, freshIds, message, onToggle, onClear, onPlay, onPass, onResolve }: HandPanelProps) {
   const player = game.players[viewerIndex];
   const current = game.players[game.currentPlayerIndex];
   const cards = player.hand;
@@ -75,7 +77,14 @@ export function HandPanel({ game, viewerIndex, canAct, selected, freshIds, messa
               : `${player.name}の手札`}
           </h2>
         </div>
-        <span className="hand-count"><strong>{cards.length}</strong>枚</span>
+        <div className="hand-header-side">
+          {canAct && turnSecondsLeft != null && (
+            <span className={`turn-timer${turnSecondsLeft <= 3 ? " is-urgent" : ""}`} role="timer" aria-label={`残り${turnSecondsLeft}秒`}>
+              残り<strong>{turnSecondsLeft}</strong>秒
+            </span>
+          )}
+          <span className="hand-count"><strong>{cards.length}</strong>枚</span>
+        </div>
       </header>
 
       <div className="hand-scroller">

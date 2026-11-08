@@ -1,0 +1,18 @@
+# 社内サーバー用。01.docs/deploy.ps1 がこのディレクトリ一式をサーバーへ送り、`docker compose up -d --build` で起動する。
+services:
+  app:
+    build: .
+    image: draw-daifugo-poc:latest
+    restart: unless-stopped
+    ports:
+      # 公開ポートは環境変数 HOST_PORT で変更できる（例: HOST_PORT=8091）
+      - "${HOST_PORT:-8090}:8090"
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

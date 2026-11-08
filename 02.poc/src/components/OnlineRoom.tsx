@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { defaultRules, enabledRuleCount } from "../game/rules";
 import type { GameEvent } from "../game/types";
 import { minSeats, viewToState, type RoomSettings, type RoomSummary } from "../online/protocol";
 import type { OnlineApi } from "../online/useOnline";
 import { GameBoard } from "./GameBoard";
-import { Segmented } from "./SetupScreen";
+import { RuleSummary, RuleToggles, Segmented } from "./SetupScreen";
 import { avatarText, seatHue } from "./theme";
 
 const nameKey = "draw-daifugo:online-name";
@@ -58,6 +59,9 @@ function CapacityMeter({ members, capacity }: { members: number; capacity: numbe
 
 function RoomRow({ room, onJoin, disabled }: { room: RoomSummary; onJoin: () => void; disabled: boolean }) {
   const remaining = room.capacity - room.members.length;
+  const ruleCount = enabledRuleCount(room.rules);
+  const customRules = ruleCount.enabled < ruleCount.total ? `・特殊ルール${ruleCount.enabled}/${ruleCount.total}` : "";
+  const jokerRule = room.rules.jokerAsEffectCard ? "・JK役扱い" : "";
   return (
     <li className="room-row">
       <div className="room-row-number">
@@ -75,7 +79,7 @@ function RoomRow({ room, onJoin, disabled }: { room: RoomSummary; onJoin: () => 
               {avatarText(member, -1)}
             </span>
           ))}
-          <span className="room-row-rules">手札{room.handSize}枚・ジョーカー{room.jokerCount}枚</span>
+          <span className="room-row-rules">手札{room.handSize}枚・ジョーカー{room.jokerCount}枚{customRules}{jokerRule}</span>
         </div>
       </div>
       <CapacityMeter members={room.members.length} capacity={room.capacity} />
@@ -88,7 +92,7 @@ function RoomRow({ room, onJoin, disabled }: { room: RoomSummary; onJoin: () => 
 export function OnlineEntry({ online }: { online: OnlineApi }) {
   const [name, setName] = useState(loadName);
   const [code, setCode] = useState(() => new URLSearchParams(window.location.search).get("room")?.replace(/\D/g, "").slice(0, 4) ?? "");
-  const [settings, setSettings] = useState<RoomSettings>({ capacity: 4, handSize: 7, jokerCount: 2, isPublic: true });
+  const [settings, setSettings] = useState<RoomSettings>({ capacity: 4, handSize: 7, jokerCount: 2, isPublic: true, rules: defaultRules });
   const [nameError, setNameError] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const busy = online.status === "connecting" || (online.hasSession && !online.room);
@@ -174,6 +178,7 @@ export function OnlineEntry({ online }: { online: OnlineApi }) {
               <Segmented label="初期手札" options={[5, 6, 7]} unit="枚" value={settings.handSize} onChange={(handSize) => setSettings({ ...settings, handSize })} />
               <Segmented label="ジョーカー" options={[0, 1, 2]} unit="枚" value={settings.jokerCount} onChange={(jokerCount) => setSettings({ ...settings, jokerCount })} />
             </div>
+            <RuleToggles rules={settings.rules} onChange={(rules) => setSettings({ ...settings, rules })} />
             <Toggle
               checked={settings.isPublic}
               onChange={(isPublic) => setSettings({ ...settings, isPublic })}
@@ -252,6 +257,7 @@ export function OnlineRoom({ online }: { online: OnlineApi }) {
   const game = useMemo(() => (room.game ? viewToState(room.game, room.mySeat) : null), [room]);
   const handKey = room.game?.myHand.map((card) => card.id).join("|") ?? "";
   const secondsLeft = useCountdown(room.startsInMs, room.version);
+  const turnSecondsLeft = useCountdown(room.turnEndsInMs, room.version);
 
   // 手札が変わったら選択を整理し、新しく加わったカード（ドロー・7渡しで受け取り）を強調する。
   useEffect(() => {
@@ -372,6 +378,7 @@ export function OnlineRoom({ online }: { online: OnlineApi }) {
                   <Segmented label="ジョーカー" options={[0, 1, 2]} unit="枚" value={room.settings.jokerCount}
                     onChange={(jokerCount) => changeSettings({ jokerCount })} />
                 </div>
+                <RuleToggles rules={room.settings.rules} onChange={(rules) => changeSettings({ rules })} />
                 <Toggle
                   checked={room.settings.isPublic}
                   onChange={(isPublic) => changeSettings({ isPublic })}
@@ -385,9 +392,12 @@ export function OnlineRoom({ online }: { online: OnlineApi }) {
                 )}
               </>
             ) : (
-              <p className="lobby-settings">
-                募集 <strong>{room.settings.capacity}</strong>人 ・ 初期手札 <strong>{room.settings.handSize}</strong>枚 ・ ジョーカー <strong>{room.settings.jokerCount}</strong>枚
-              </p>
+              <div>
+                <p className="lobby-settings">
+                  募集 <strong>{room.settings.capacity}</strong>人 ・ 初期手札 <strong>{room.settings.handSize}</strong>枚 ・ ジョーカー <strong>{room.settings.jokerCount}</strong>枚
+                </p>
+                <RuleSummary rules={room.settings.rules} />
+              </div>
             )}
             {online.error && <p className="form-error" role="alert">{online.error}</p>}
           </section>
@@ -407,6 +417,8 @@ export function OnlineRoom({ online }: { online: OnlineApi }) {
       viewerIndex={room.mySeat}
       canAct={canAct}
       connected={connected}
+      turnSecondsLeft={turnSecondsLeft}
+      online
       selected={selected}
       freshIds={freshIds}
       message={online.error}

@@ -62,7 +62,26 @@ export interface GameEvent {
   text: string;
 }
 
+/** 特殊ルールの有効・無効。パスで1枚ドローはこのゲームの基本ルールのため常に有効。 */
+export interface RuleSettings {
+  fiveSkip: boolean;
+  sevenTransfer: boolean;
+  eightCut: boolean;
+  tenDiscard: boolean;
+  elevenBack: boolean;
+  revolution: boolean;
+  binding: boolean;
+  spadeThree: boolean;
+  forbiddenFinish: boolean;
+  /**
+   * 役カード（5・7・8・10・J）と組んだジョーカーを、その役カードとして数えるか。
+   * 例: 10＋ジョーカーのペアなら10捨てが2枚になる。階段ではジョーカーが補った数字として数える。
+   */
+  jokerAsEffectCard: boolean;
+}
+
 export interface GameState {
+  rules: RuleSettings;
   players: Player[];
   deck: Card[];
   recycle: Card[];
@@ -87,6 +106,8 @@ export interface GameOptions {
   handSize: number;
   jokerCount: number;
   playerNames?: string[];
+  /** 省略したルールは既定値（ジョーカーの役カード扱い以外すべて有効）になる。 */
+  rules?: Partial<RuleSettings>;
 }
 
 export type ActionResult =

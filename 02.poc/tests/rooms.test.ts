@@ -23,7 +23,7 @@ class FakeConn implements Connection {
 
 function setup(players = 2, capacity = 5, isPublic = true) {
   let now = 1_000_000;
-  const manager = new RoomManager(() => now, { autoPlayMs: 1000 });
+  const manager = new RoomManager(() => now, { turnTimeMs: 1000 });
   const conns = Array.from({ length: players }, () => new FakeConn());
   manager.handle(conns[0], { type: "create", name: "ホスト", settings: { capacity, handSize: 5, jokerCount: 2, isPublic } });
   const code = conns[0].room.code;
@@ -102,6 +102,65 @@ describe("room manager", () => {
     advance(1500);
     manager.tick();
     expect(conns[1].room.game!.currentPlayerIndex).toBe(1);
+  });
+
+  it("auto-passes for a connected player who runs out of thinking time", () => {
+    const { manager, conns, advance } = setup(2);
+    manager.handle(conns[0], { type: "start" });
+    expect(conns[0].room.turnEndsInMs).toBe(1000);
+    advance(900);
+    manager.tick();
+    expect(conns[0].room.game!.currentPlayerIndex).toBe(0);
+    advance(100);
+    manager.tick();
+    const game = conns[0].room.game!;
+    expect(game.currentPlayerIndex).toBe(1);
+    // 時間切れでもドローは行われる。
+    expect(game.myHand).toHaveLength(6);
+    expect(game.log.at(-1)).toBe("ホストは時間切れのため自動で進行しました。");
+    expect(conns[1].room.turnEndsInMs).toBe(1000);
+  });
+
+  it("does not restart the thinking time after drawing", () => {
+    const { manager, conns, advance } = setup(2);
+    manager.handle(conns[0], { type: "start" });
+    advance(600);
+    manager.handle(conns[0], { type: "pass" });
+    expect(conns[0].room.turnEndsInMs).toBe(400);
+  });
+
+  it("uses a 10 second thinking time by default", () => {
+    let now = 0;
+    const manager = new RoomManager(() => now);
+    const host = new FakeConn();
+    const guest = new FakeConn();
+    manager.handle(host, { type: "create", name: "ホスト", settings: { capacity: 4, handSize: 5, jokerCount: 2, isPublic: true } });
+    manager.handle(guest, { type: "join", code: host.room.code, name: "ゲスト" });
+    manager.handle(host, { type: "start" });
+    expect(host.room.turnEndsInMs).toBe(10_000);
+    now = 9_999;
+    manager.tick();
+    expect(host.room.game!.currentPlayerIndex).toBe(0);
+    now = 10_000;
+    manager.tick();
+    expect(host.room.game!.currentPlayerIndex).toBe(1);
+  });
+
+  it("starts the game with the room's rule settings", () => {
+    const { manager, conns } = setup(2);
+    const rules = { ...conns[0].room.settings.rules, eightCut: false, jokerAsEffectCard: true };
+    manager.handle(conns[0], { type: "settings", settings: { ...conns[0].room.settings, rules } });
+    expect(conns[1].room.settings.rules.eightCut).toBe(false);
+    manager.handle(conns[0], { type: "start" });
+    expect(conns[1].room.game!.rules).toMatchObject({ eightCut: false, jokerAsEffectCard: true, revolution: true });
+  });
+
+  it("validates rule settings", () => {
+    const settings = { capacity: 4, handSize: 5, jokerCount: 0, isPublic: true };
+    const parsed = parseClientMessage({ type: "create", name: "a", settings: { ...settings, rules: { fiveSkip: false } } });
+    expect(parsed).toMatchObject({ settings: { rules: { fiveSkip: false, sevenTransfer: true, jokerAsEffectCard: false } } });
+    expect(parseClientMessage({ type: "create", name: "a", settings: { ...settings, rules: { fiveSkip: "no" } } })).toBeNull();
+    expect(parseClientMessage({ type: "create", name: "a", settings: { ...settings, rules: [] } })).toBeNull();
   });
 
   it("validates incoming messages", () => {

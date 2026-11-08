@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { GameEvent, GameState } from "../game/types";
 import { HandPanel } from "./HandPanel";
 import { EventBurst } from "./Overlays";
 import { ResultScreen } from "./ResultScreen";
+import { RulesDialog } from "./RuleReference";
 import { Felt, LogPanel, Seats, StatusPills } from "./Table";
 
 interface GameBoardProps {
@@ -12,6 +13,10 @@ interface GameBoardProps {
   /** 手札を隠すか（ローカル対戦の受け渡し中）。 */
   concealed?: boolean;
   connected?: boolean[];
+  /** オンライン対戦で、現在の手番が自動で進むまでの残り秒数。 */
+  turnSecondsLeft?: number | null;
+  /** オンライン対戦か（ルール確認で思考時間の説明を出すかどうか）。 */
+  online?: boolean;
   selected: string[];
   freshIds: string[];
   message: string;
@@ -31,6 +36,8 @@ interface GameBoardProps {
 export function GameBoard(props: GameBoardProps) {
   const { game, viewerIndex, canAct, concealed = false, burst } = props;
   const [visibleBurst, setVisibleBurst] = useState(burst);
+  const [showRules, setShowRules] = useState(false);
+  const closeRules = useCallback(() => setShowRules(false), []);
 
   useEffect(() => {
     setVisibleBurst(burst);
@@ -48,12 +55,15 @@ export function GameBoard(props: GameBoardProps) {
         </button>
         {props.topbarExtra}
         <StatusPills game={game} />
-        <button type="button" className="btn btn-ghost btn-sm topbar-exit" onClick={props.onExit}>終了</button>
+        <div className="topbar-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowRules(true)} aria-haspopup="dialog">ルール</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={props.onExit}>終了</button>
+        </div>
       </header>
 
       <div className="game-layout">
         <div className="game-main">
-          <Seats game={game} viewerIndex={concealed ? undefined : viewerIndex} connected={props.connected} />
+          <Seats game={game} viewerIndex={concealed ? undefined : viewerIndex} connected={props.connected} turnSecondsLeft={props.turnSecondsLeft} />
           <Felt game={game} />
           {props.alert}
           {game.phase === "finished" ? (
@@ -67,6 +77,7 @@ export function GameBoard(props: GameBoardProps) {
               game={game}
               viewerIndex={viewerIndex}
               canAct={canAct}
+              turnSecondsLeft={props.turnSecondsLeft}
               selected={props.selected}
               freshIds={props.freshIds}
               message={props.message}
@@ -83,6 +94,7 @@ export function GameBoard(props: GameBoardProps) {
 
       {props.overlay}
       {visibleBurst && <EventBurst key={visibleBurst.key} events={visibleBurst.events} />}
+      {showRules && <RulesDialog rules={game.rules} online={props.online ?? false} onClose={closeRules} />}
     </main>
   );
 }
