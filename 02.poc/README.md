@@ -80,3 +80,19 @@ npm run dev          # ターミナル2：画面（http://localhost:5173）
 npm test
 npm run build
 ```
+
+## Cloudflare へのデプロイ
+
+本番（https://draw-daifugo.jny-apps.com）は Cloudflare Workers の `daifugo` で動いています。
+
+- 画面：`dist`（`npm run build:web` の出力）を静的アセットとして配信
+- オンライン対戦：`/ws` を Durable Object `Lobby` 1つに集約（`worker/index.ts`）。ルームはメモリ上のみで、デプロイすると進行中の対戦は消えます
+- 設定：`wrangler.jsonc`。`wrangler deploy` が先に `npm run build:web` を実行します
+
+```bash
+cd 02.poc
+npm ci
+npx wrangler deploy
+```
+
+Git 連携（Workers Builds）で自動デプロイする場合は、ルートディレクトリを `02.poc`、デプロイコマンドを `npx wrangler deploy` にしてください。
