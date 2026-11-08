@@ -1,0 +1,31 @@
+{
+  "name": "draw-daifugo-poc",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "dev:server": "npm run build:server && node dist-server/index.js",
+    "build": "tsc -b && vite build && npm run build:server",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=dist-server/index.js",
+    "start": "node dist-server/index.js",
+    "test": "vitest run",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.7.2",
+    "vite": "^7.0.0",
+    "vitest": "^5.1.0"
+  }
+}
