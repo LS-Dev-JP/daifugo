@@ -1,6 +1,8 @@
-import type { CSSProperties, ReactNode } from "react";
-import type { Card } from "../game/types";
+import { useId, type CSSProperties, type ReactNode } from "react";
+import { defaultRules, enabledRuleCount, ruleDefinitions } from "../game/rules";
+import type { Card, RuleSettings } from "../game/types";
 import { PlayingCard } from "./PlayingCard";
+import { RuleList } from "./RuleReference";
 import { seatHue } from "./theme";
 
 export interface SetupValues {
@@ -9,6 +11,7 @@ export interface SetupValues {
   jokerCount: number;
   names: string[];
   handoff: boolean;
+  rules: RuleSettings;
 }
 
 export type PlayMode = "local" | "online";
@@ -32,18 +35,59 @@ const heroCards: Card[] = [
   { id: "hero-5", suit: "C", rank: 3, isJoker: false },
 ];
 
-const rules: Array<{ key: string; title: string; body: string }> = [
-  { key: "DRAW", title: "パスで1枚ドロー", body: "パスすると山札から1枚引き、そのまま手札のどのカードでも出せます。出さずに終えることもできます。" },
-  { key: "5", title: "5スキップ", body: "出した5の枚数だけ、次のプレイヤーを飛ばします。" },
-  { key: "7", title: "7渡し", body: "出した7の枚数だけ、手札を次のプレイヤーに渡します。" },
-  { key: "8", title: "8切り", body: "場を流し、出したプレイヤーから次の場を始めます。" },
-  { key: "10", title: "10捨て", body: "出した10の枚数だけ、手札を捨てられます。" },
-  { key: "J", title: "11バック", body: "場が流れるまで、カードの強さが逆転します。" },
-  { key: "革", title: "革命", body: "同じ数字4枚、または4枚以上の階段で成立。強さが逆転し、場が流れても続きます。" },
-  { key: "縛", title: "縛り", body: "前のプレイとスートが続くと縛りが成立し、場が流れるまでそのスートしか出せません。" },
-  { key: "♠3", title: "スペ3返し", body: "ジョーカー1枚出しには、スペードの3だけが出せます。" },
-  { key: "×", title: "上がり禁止", body: "スペ3・5・7・8・10・J・ジョーカーや革命では上がれません。" },
-];
+const specialRules = ruleDefinitions.filter((rule) => !rule.isOption);
+const jokerOption = ruleDefinitions.find((rule) => rule.key === "jokerAsEffectCard")!;
+
+/** 特殊ルールの有効・無効を切り替える。 */
+export function RuleToggles({ rules, onChange }: { rules: RuleSettings; onChange: (rules: RuleSettings) => void }) {
+  const { enabled, total } = enabledRuleCount(rules);
+  const isDefault = ruleDefinitions.every((rule) => rules[rule.key] === defaultRules[rule.key]);
+  const labelId = useId();
+  return (
+    <div className="rule-toggles">
+      <div className="rule-toggles-head">
+        <span className="rule-toggles-label" id={labelId}>特殊ルール（{enabled}/{total} 有効）</span>
+        {!isDefault && <button type="button" onClick={() => onChange({ ...defaultRules })}>既定に戻す</button>}
+      </div>
+      <div className="rule-chips" role="group" aria-labelledby={labelId}>
+        {specialRules.map((rule) => (
+          <button
+            key={rule.key}
+            type="button"
+            className={`rule-chip${rules[rule.key] ? " is-on" : ""}`}
+            aria-pressed={rules[rule.key]}
+            title={rule.body}
+            onClick={() => onChange({ ...rules, [rule.key]: !rules[rule.key] })}
+          >
+            <span className="rule-key" aria-hidden="true">{rule.mark}</span>
+            <span>{rule.title}</span>
+          </button>
+        ))}
+      </div>
+      <label className="toggle">
+        <input type="checkbox" checked={rules.jokerAsEffectCard} onChange={(event) => onChange({ ...rules, jokerAsEffectCard: event.target.checked })} />
+        <span className="toggle-track" aria-hidden="true"><span /></span>
+        <span className="toggle-text">
+          <strong>{jokerOption.title}</strong>
+          <small>{jokerOption.body}</small>
+        </span>
+      </label>
+    </div>
+  );
+}
+
+/** ホスト以外に見せる、ルール設定の一覧。 */
+export function RuleSummary({ rules }: { rules: RuleSettings }) {
+  return (
+    <div className="rule-summary" aria-label="特殊ルール">
+      {ruleDefinitions.map((rule) => (
+        <span key={rule.key} className={rules[rule.key] ? "" : "is-off"}>
+          {rule.isOption ? (rules[rule.key] ? "ジョーカーも役カードに数える" : "ジョーカーは役カードに数えない") : rule.title}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function Segmented({
   label,
@@ -130,6 +174,8 @@ export function SetupScreen({ mode, onModeChange, onlinePanel, values, error, on
           <Segmented label="ジョーカー" options={[0, 1, 2]} unit="枚" value={values.jokerCount} onChange={(jokerCount) => update({ jokerCount })} />
         </div>
 
+        <RuleToggles rules={values.rules} onChange={(rules) => update({ rules })} />
+
         <fieldset className="field">
           <legend>プレイヤー名</legend>
           <div className="name-grid">
@@ -170,20 +216,9 @@ export function SetupScreen({ mode, onModeChange, onlinePanel, values, error, on
       <details className="rules">
         <summary>
           <span>ルールを確認する</span>
-          <small>{rules.length}つの特殊ルール</small>
+          <small>{specialRules.length}つの特殊ルール</small>
         </summary>
-        <ul className="rule-list">
-          {rules.map((rule) => (
-            <li key={rule.key}>
-              <span className="rule-key">{rule.key}</span>
-              <div>
-                <strong>{rule.title}</strong>
-                <p>{rule.body}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-        <p className="fine-print">強さは 3 &lt; 4 &lt; … &lt; K &lt; A &lt; 2 &lt; ジョーカー。革命と11バックが重なると元に戻ります。一部は未確定の暫定ルールです。</p>
+        <RuleList />
       </details>
     </div>
   );

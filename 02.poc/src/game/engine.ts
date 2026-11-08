@@ -6,9 +6,11 @@ import type {
   GameState,
   PendingEffect,
   Player,
+  RuleSettings,
   Suit,
   Trick,
 } from "./types";
+import { defaultRules } from "./rules";
 
 type Classified = Omit<Trick, "playerId" | "cards">;
 
@@ -79,6 +81,7 @@ export function startGame(
   players.forEach((player) => player.hand.sort(compareCards));
 
   return {
+    rules: { ...defaultRules, ...options.rules },
     players,
     deck,
     recycle: [],
@@ -143,11 +146,30 @@ function nextActiveIndex(state: GameState, from: number, steps = 1): number {
   return index;
 }
 
+/**
+ * 次に手番が回るプレイヤー。上がった人と、この場でパスした人（場が流れるまで参加できない）は飛ばす。
+ * 5スキップで飛ばす人数も、参加できる人だけを数える。
+ */
+function nextTurnIndex(state: GameState, from: number, steps = 1): number {
+  const eligible = (index: number) =>
+    state.players[index].finishRank === null && !state.passedPlayerIds.includes(state.players[index].id);
+  let index = from;
+  for (let step = 0; step < steps; step += 1) {
+    let attempts = 0;
+    do {
+      index = (index + 1) % state.players.length;
+      attempts += 1;
+    } while (!eligible(index) && attempts <= state.players.length);
+    if (!eligible(index)) return nextActiveIndex(state, from, steps);
+  }
+  return index;
+}
+
 function rankStrength(rank: number, reversed: boolean): number {
   return reversed ? 15 - rank : rank;
 }
 
-function classify(cards: Card[], reversed: boolean): Classified | null {
+function classify(cards: Card[], reversed: boolean, rules: RuleSettings): Classified | null {
   if (cards.length === 0) return null;
   if (cards.length === 1 && cards[0].isJoker) {
     return { kind: "single", count: 1, rank: 16, lowRank: 16, highRank: 16, suits: [], isJokerSingle: true, isRevolution: false };
@@ -206,16 +228,37 @@ function classify(cards: Card[], reversed: boolean): Classified | null {
     highRank,
     suits: trickSuits,
     isJokerSingle: false,
-    isRevolution: (kind === "group" && cards.length === 4) || (kind === "straight" && cards.length >= 4),
+    isRevolution: rules.revolution && ((kind === "group" && cards.length === 4) || (kind === "straight" && cards.length >= 4)),
   };
+}
+
+/**
+ * 効果の判定に使う、出したカードの数字の一覧。
+ * ジョーカーは「役カードとして数える」が有効なときだけ、ペアならその数字、階段なら補った数字として含める。
+ */
+function effectRanks(cards: Card[], trick: Classified, rules: RuleSettings): number[] {
+  if (trick.isJokerSingle) return [];
+  const ranks = cards.filter((card) => !card.isJoker).map((card) => card.rank as number);
+  if (!rules.jokerAsEffectCard) return ranks;
+  const jokerCount = cards.length - ranks.length;
+  if (trick.kind === "straight") {
+    for (let rank = trick.lowRank; rank <= trick.highRank; rank += 1) {
+      if (!ranks.includes(rank)) ranks.push(rank);
+    }
+  } else {
+    for (let index = 0; index < jokerCount; index += 1) ranks.push(trick.rank);
+  }
+  return ranks;
 }
 
 function validateAgainstTrick(state: GameState, candidate: Classified, cards: Card[]): string | null {
   const previous = state.trick;
   if (!previous) return null;
   if (candidate.isJokerSingle && !previous.isJokerSingle && previous.count === 1 && previous.kind === "single") return null;
-  if (previous.isJokerSingle && cards.length === 1 && cards[0].suit === "S" && cards[0].rank === 3) return null;
-  if (previous.isJokerSingle) return "ジョーカーにはスペード3以外のカードを出せません。";
+  if (state.rules.spadeThree && previous.isJokerSingle && cards.length === 1 && cards[0].suit === "S" && cards[0].rank === 3) return null;
+  if (previous.isJokerSingle) {
+    return state.rules.spadeThree ? "ジョーカーにはスペード3以外のカードを出せません。" : "ジョーカーより強いカードはありません。";
+  }
   if (candidate.kind !== previous.kind || candidate.count !== previous.count) return "場と同じ枚数・役のカードを選んでください。";
   if (state.binding) {
     // 縛り中は指定スートをすべて含む必要がある。足りないスートはジョーカーで補える。
@@ -257,12 +300,21 @@ function currentPlayer(state: GameState): Player {
   return state.players[state.currentPlayerIndex];
 }
 
-function isForbiddenFinish(cards: Card[], trick: Classified): boolean {
-  const specialRank = cards.some((card) =>
-    card.isJoker || card.rank === 5 || card.rank === 7 || card.rank === 8 || card.rank === 10 || card.rank === 11 ||
-    (card.rank === 3 && card.suit === "S"),
+/** 上がり禁止の判定。無効にした特殊ルールのカードは、効果がないため上がりに使える。 */
+function isForbiddenFinish(cards: Card[], trick: Classified, rules: RuleSettings): boolean {
+  if (!rules.forbiddenFinish) return false;
+  const effectRank: Record<number, boolean> = {
+    5: rules.fiveSkip,
+    7: rules.sevenTransfer,
+    8: rules.eightCut,
+    10: rules.tenDiscard,
+    11: rules.elevenBack,
+  };
+  const specialCard = cards.some((card) =>
+    card.isJoker || (card.rank !== null && effectRank[card.rank]) ||
+    (rules.spadeThree && card.rank === 3 && card.suit === "S"),
   );
-  return specialRank || trick.isRevolution;
+  return specialCard || trick.isRevolution;
 }
 
 function finishTurn(state: GameState, playerId: string, skip = 0, samePlayer = false): void {
@@ -299,7 +351,7 @@ function finishTurn(state: GameState, playerId: string, skip = 0, samePlayer = f
   if (samePlayer && player.finishRank === null) {
     state.currentPlayerIndex = currentIndex;
   } else {
-    state.currentPlayerIndex = nextActiveIndex(state, currentIndex, skip + 1);
+    state.currentPlayerIndex = nextTurnIndex(state, currentIndex, skip + 1);
   }
 }
 
@@ -359,12 +411,12 @@ function validatePlay(state: GameState, cardIds: string[]): PlayValidation {
     return { ok: false, error: "選択したカードが手札にありません。" };
   }
   const cards = selected as Card[];
-  const classified = classify(cards, isReversed(state));
+  const classified = classify(cards, isReversed(state), state.rules);
   if (!classified) return { ok: false, error: "その組み合わせは役になりません。" };
   const trickError = validateAgainstTrick(state, classified, cards);
   if (trickError) return { ok: false, error: trickError };
-  if (activePlayers(state).length > 1 && player.hand.length === cards.length && isForbiddenFinish(cards, classified)) {
-    return { ok: false, error: "特殊効果のあるカード・革命では上がれません。" };
+  if (activePlayers(state).length > 1 && player.hand.length === cards.length && isForbiddenFinish(cards, classified, state.rules)) {
+    return { ok: false, error: "特殊効果のあるカード・ジョーカー・革命では上がれません。" };
   }
   return { ok: true, cards, classified };
 }
@@ -389,14 +441,15 @@ export function playCards(state: GameState, cardIds: string[]): ActionResult {
   const oldTrick = next.trick;
   const trick: Trick = { ...classified, playerId: player.id, cards: structuredClone(cards) };
   next.trick = trick;
-  next.passedPlayerIds = [];
+  // パスした人は、ほかの人が出しても場が流れるまで参加できないため、ここではリセットしない。
   addLog(next, `${player.name}が${cards.map(cardLabel).join("・")}を出しました。`);
 
   if (oldTrick?.isJokerSingle && !trick.isJokerSingle) {
     addEvent(next, { kind: "joker-return", text: "スペ3返し" });
   }
   // 縛りは一度成立したら場が流れるまで維持する。
-  if (!next.binding && oldTrick && oldTrick.suits.length > 0 && trick.suits.some((suit) => oldTrick.suits.includes(suit))) {
+  const rules = next.rules;
+  if (rules.binding && !next.binding && oldTrick && oldTrick.suits.length > 0 && trick.suits.some((suit) => oldTrick.suits.includes(suit))) {
     next.binding = trick.suits.filter((suit) => oldTrick.suits.includes(suit));
     const symbols = next.binding.map((suit) => suitSymbols[suit]).join("");
     addLog(next, `${symbols}縛りが発生しました。`);
@@ -407,21 +460,23 @@ export function playCards(state: GameState, cardIds: string[]): ActionResult {
     addLog(next, `革命${next.revolution ? "発生" : "返し"}。`);
     addEvent(next, next.revolution ? { kind: "revolution", text: "革命" } : { kind: "revolution-end", text: "革命返し" });
   }
-  if (cards.some((card) => card.rank === 11)) {
+  const ranks = effectRanks(cards, classified, rules);
+  const countOf = (rank: number) => ranks.filter((value) => value === rank).length;
+  if (rules.elevenBack && countOf(11) > 0) {
     next.elevenBack = !next.elevenBack;
     addLog(next, `11バック${next.elevenBack ? "発生" : "解除"}。`);
     addEvent(next, next.elevenBack ? { kind: "eleven-back", text: "11バック" } : { kind: "eleven-back-end", text: "11バック解除" });
   }
 
-  const sevenCount = cards.filter((card) => card.rank === 7).length;
-  const tenCount = cards.filter((card) => card.rank === 10).length;
+  const sevenCount = rules.sevenTransfer ? countOf(7) : 0;
+  const tenCount = rules.tenDiscard ? countOf(10) : 0;
   next.effectQueue = [
     ...(sevenCount > 0 ? [{ type: "transfer", count: sevenCount } as const] : []),
     ...(tenCount > 0 ? [{ type: "discard", count: tenCount } as const] : []),
   ];
   next.postEffect = {
-    cut: cards.some((card) => card.rank === 8),
-    skip: cards.filter((card) => card.rank === 5).length,
+    cut: rules.eightCut && countOf(8) > 0,
+    skip: rules.fiveSkip ? countOf(5) : 0,
   };
   advanceAfterPlay(next, player.id);
   return { ok: true, state: next };

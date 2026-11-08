@@ -4,7 +4,12 @@ import type { GameState } from "../game/types";
 import { CardBack, PlayingCard } from "./PlayingCard";
 import { avatarText, seatHue } from "./theme";
 
-export function Seats({ game, viewerIndex, connected }: { game: GameState; viewerIndex?: number; connected?: boolean[] }) {
+export function Seats({ game, viewerIndex, connected, turnSecondsLeft }: {
+  game: GameState;
+  viewerIndex?: number;
+  connected?: boolean[];
+  turnSecondsLeft?: number | null;
+}) {
   const finished = game.phase === "finished";
   return (
     <section className="seats" aria-label="プレイヤー">
@@ -27,7 +32,9 @@ export function Seats({ game, viewerIndex, connected }: { game: GameState; viewe
                 <span className="seat-name">{player.name}</span>
                 {index === viewerIndex && <span className="seat-badge is-me">YOU</span>}
                 {offline && <span className="seat-badge is-offline">切断中</span>}
-                {!player.finishRank && isCurrent && <span className="seat-badge is-turn">手番</span>}
+                {!player.finishRank && isCurrent && (
+                  <span className="seat-badge is-turn">手番{turnSecondsLeft != null && ` ${turnSecondsLeft}秒`}</span>
+                )}
                 {!player.finishRank && !isCurrent && passed && <span className="seat-badge is-pass">PASS</span>}
               </span>
               <span className="seat-meta">
@@ -58,18 +65,24 @@ export function StatusPills({ game }: { game: GameState }) {
         <span className="pill-label">山札</span>
         <strong>{game.deck.length}</strong>
       </li>
-      <li className={`pill${game.revolution ? " is-hot" : ""}`}>
-        <span className="pill-label">革命</span>
-        <strong>{game.revolution ? "ON" : "—"}</strong>
-      </li>
-      <li className={`pill${game.elevenBack ? " is-hot" : ""}`}>
-        <span className="pill-label">11バック</span>
-        <strong>{game.elevenBack ? "ON" : "—"}</strong>
-      </li>
-      <li className={`pill${game.binding ? " is-gold" : ""}`}>
-        <span className="pill-label">縛り</span>
-        <strong>{game.binding ? game.binding.map((suit) => suitSymbols[suit]).join("") : "—"}</strong>
-      </li>
+      {game.rules.revolution && (
+        <li className={`pill${game.revolution ? " is-hot" : ""}`}>
+          <span className="pill-label">革命</span>
+          <strong>{game.revolution ? "ON" : "—"}</strong>
+        </li>
+      )}
+      {game.rules.elevenBack && (
+        <li className={`pill${game.elevenBack ? " is-hot" : ""}`}>
+          <span className="pill-label">11バック</span>
+          <strong>{game.elevenBack ? "ON" : "—"}</strong>
+        </li>
+      )}
+      {game.rules.binding && (
+        <li className={`pill${game.binding ? " is-gold" : ""}`}>
+          <span className="pill-label">縛り</span>
+          <strong>{game.binding ? game.binding.map((suit) => suitSymbols[suit]).join("") : "—"}</strong>
+        </li>
+      )}
       <li className={`pill pill-direction${reversed ? " is-hot" : ""}`}>
         <span className="pill-label">強さ</span>
         <strong>{reversed ? "2 → 3" : "3 → 2"}</strong>

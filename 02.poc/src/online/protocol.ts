@@ -1,4 +1,4 @@
-import type { Card, GameEvent, GameState, PendingEffect, Phase, Suit, Trick } from "../game/types";
+import type { Card, GameEvent, GameState, PendingEffect, Phase, RuleSettings, Suit, Trick } from "../game/types";
 
 /** ルーム作成時に指定できる設定。 */
 export interface RoomSettings {
@@ -8,12 +8,15 @@ export interface RoomSettings {
   jokerCount: number;
   /** 募集一覧に表示するか。false の場合はルーム番号を知っている人だけが参加できる。 */
   isPublic: boolean;
+  rules: RuleSettings;
 }
 
 export const maxSeats = 5;
 export const minSeats = 2;
 /** 募集人数がそろってから開始するまでの待ち時間。 */
 export const autoStartDelayMs = 5_000;
+/** 1手番の思考時間。過ぎると自動で進行する（7渡し・10捨ての選択はそれぞれ別に数える）。 */
+export const turnTimeMs = 10_000;
 
 /** 募集一覧に表示するルームの概要。 */
 export interface RoomSummary {
@@ -23,10 +26,12 @@ export interface RoomSummary {
   capacity: number;
   handSize: number;
   jokerCount: number;
+  rules: RuleSettings;
 }
 
 /** プレイヤーごとに見える範囲だけを含むゲーム状態。他人の手札・山札の中身は含めない。 */
 export interface GameView {
+  rules: RuleSettings;
   players: Array<{ id: string; name: string; handCount: number; finishRank: number | null }>;
   myHand: Card[];
   deckCount: number;
@@ -55,6 +60,8 @@ export interface RoomView {
   version: number;
   /** 募集人数がそろって自動開始を待っている場合、開始までの残りミリ秒。 */
   startsInMs: number | null;
+  /** 対戦中、現在の手番が自動で進行するまでの残りミリ秒。 */
+  turnEndsInMs: number | null;
   game: GameView | null;
 }
 
@@ -79,6 +86,7 @@ export type ServerMessage =
 
 export function toGameView(state: GameState, seat: number): GameView {
   return {
+    rules: state.rules,
     players: state.players.map((player) => ({
       id: player.id,
       name: player.name,
@@ -112,6 +120,7 @@ function hiddenCards(prefix: string, count: number): Card[] {
  */
 export function viewToState(view: GameView, seat: number): GameState {
   return {
+    rules: view.rules,
     players: view.players.map((player, index) => ({
       id: player.id,
       name: player.name,

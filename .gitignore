@@ -1,1 +1,5 @@
 .wrangler/
+
+# デプロイ手順（ローカル管理）
+01.docs/03.デプロイ手順.md
+01.docs/deploy.ps1

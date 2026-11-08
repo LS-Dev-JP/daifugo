@@ -1,11 +1,13 @@
 import { randomBytes, randomInt } from "node:crypto";
 import { pass, playCards, resolveEffect, startGame } from "../src/game/engine";
+import { parseRules } from "../src/game/rules";
 import type { ActionResult, GameState } from "../src/game/types";
 import {
   autoStartDelayMs,
   maxSeats,
   minSeats,
   toGameView,
+  turnTimeMs,
   type ClientMessage,
   type RoomSettings,
   type RoomSummary,
@@ -42,8 +44,8 @@ interface Room {
 
 export interface RoomManagerOptions {
   maxRooms: number;
-  /** 切断中のプレイヤーの手番を自動で進めるまでの時間。 */
-  autoPlayMs: number;
+  /** 手番の思考時間。過ぎると接続の有無にかかわらず自動で進める。 */
+  turnTimeMs: number;
   /** 全員が切断してからルームを削除するまでの時間。 */
   roomTtlMs: number;
   /** ロビーで切断したままの席を外すまでの時間。 */
@@ -54,7 +56,7 @@ export interface RoomManagerOptions {
 
 const defaultOptions: RoomManagerOptions = {
   maxRooms: 200,
-  autoPlayMs: 45_000,
+  turnTimeMs,
   roomTtlMs: 15 * 60_000,
   lobbySeatTtlMs: 2 * 60_000,
   listLimit: 50,
@@ -75,10 +77,13 @@ function inRange(value: unknown, min: number, max: number): value is number {
 
 function asSettings(value: unknown): RoomSettings | null {
   if (typeof value !== "object" || value === null) return null;
-  const { capacity, handSize, jokerCount, isPublic } = value as Record<string, unknown>;
+  const { capacity, handSize, jokerCount, isPublic, rules: rawRules } = value as Record<string, unknown>;
   if (!inRange(capacity, minSeats, maxSeats) || !inRange(handSize, 5, 7) || !inRange(jokerCount, 0, 2)) return null;
   if (typeof isPublic !== "boolean") return null;
-  return { capacity, handSize, jokerCount, isPublic };
+  // ルールを省略した場合は既定のルールで遊ぶ。
+  const rules = parseRules(rawRules);
+  if (!rules) return null;
+  return { capacity, handSize, jokerCount, isPublic, rules };
 }
 
 function asRoomCode(value: unknown): string | null {
@@ -192,7 +197,7 @@ export class RoomManager {
     this.broadcast(room, false);
   }
 
-  /** 定期処理：自動開始、切断中プレイヤーの自動進行、使われなくなったルームの削除。 */
+  /** 定期処理：自動開始、思考時間切れの自動進行、使われなくなったルームの削除。 */
   tick(): void {
     const now = this.now();
     for (const room of this.rooms.values()) {
@@ -220,9 +225,10 @@ export class RoomManager {
     const game = room.game;
     if (!game || game.phase === "finished") return;
     const seat = room.seats[game.currentPlayerIndex];
-    if (!seat || seat.conn) return;
-    const waited = seat.left ? Infinity : now - Math.max(room.turnStartedAt, seat.disconnectedAt ?? 0);
-    if (waited < this.options.autoPlayMs) return;
+    if (!seat) return;
+    // 退出したプレイヤーは待たずに進める。それ以外は接続中・切断中とも思考時間で区切る。
+    const waited = seat.left ? Infinity : now - room.turnStartedAt;
+    if (waited < this.options.turnTimeMs) return;
 
     let state: GameState = game;
     if (state.phase === "effect" && state.pendingEffect) {
@@ -236,7 +242,8 @@ export class RoomManager {
         state = result.state;
       }
     }
-    state.log = [...state.log.slice(-39), `${seat.name}は接続が切れているため自動で進行しました。`];
+    const reason = seat.conn ? "時間切れのため" : "接続が切れているため";
+    state.log = [...state.log.slice(-39), `${seat.name}は${reason}自動で進行しました。`];
     this.commit(room, state);
   }
 
@@ -387,6 +394,7 @@ export class RoomManager {
       playerCount: room.seats.length,
       handSize: room.settings.handSize,
       jokerCount: room.settings.jokerCount,
+      rules: room.settings.rules,
       playerNames: room.seats.map((item) => item.name),
     });
     room.status = "playing";
@@ -408,7 +416,9 @@ export class RoomManager {
     const previous = room.game;
     room.game = state;
     room.lastActivity = this.now();
-    if (!previous || previous.currentPlayerIndex !== state.currentPlayerIndex || previous.phase !== state.phase) {
+    // 手番・フェーズ・選択する効果が変わったら思考時間を数え直す（パスでドローしただけでは数え直さない）。
+    if (!previous || previous.currentPlayerIndex !== state.currentPlayerIndex || previous.phase !== state.phase ||
+      previous.pendingEffect?.type !== state.pendingEffect?.type) {
       room.turnStartedAt = this.now();
     }
     if (state.phase === "finished") {
@@ -469,6 +479,7 @@ export class RoomManager {
         capacity: room.settings.capacity,
         handSize: room.settings.handSize,
         jokerCount: room.settings.jokerCount,
+        rules: room.settings.rules,
       }));
     const playing = [...this.rooms.values()].filter((room) => room.status === "playing").length;
     return { type: "rooms", rooms, playing };
@@ -497,6 +508,9 @@ export class RoomManager {
       seats: room.seats.map((seat) => ({ name: seat.name, connected: seat.conn !== null })),
       version: room.version,
       startsInMs: room.startAt === null ? null : Math.max(0, room.startAt - this.now()),
+      turnEndsInMs: room.status === "playing" && room.game && room.game.phase !== "finished"
+        ? Math.max(0, room.turnStartedAt + this.options.turnTimeMs - this.now())
+        : null,
       game,
     };
   }
